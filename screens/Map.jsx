@@ -316,114 +316,201 @@
 // })
 
 
-import React, { useState, useEffect } from "react";
+import * as React from "react";
 import { Dimensions, StyleSheet, Text, View } from "react-native";
+import { GooglePlacesAutocomplete } from "react-native-google-places-autocomplete";
 import MapView, { Callout, Circle, Marker } from "react-native-maps";
-// import { PermissionsAndroid, Platform } from "react-native";
-import Geolocation from "@react-native-community/geolocation";
-import MapViewDirections from "react-native-maps-directions";
+import * as Location from 'expo-location';
+import MapViewDirections from 'react-native-maps-directions';
 
 export default function MapComponent() {
-  const [userLocation, setUserLocation] = useState(null);
-  const [pin, setPin] = useState({
-    latitude: 50.4501, // Kyiv latitude
-    longitude: 30.5234, // Kyiv longitude
-  });
-  const [region, setRegion] = useState({
-    latitude: 50.4501,
-    longitude: 30.5234,
-    latitudeDelta: 0.0922,
-    longitudeDelta: 0.0421,
-  });
+	const [pin, setPin] = React.useState({
+		latitude: 49.842957,
+		longitude: 24.031111,
+	});
+	const [region, setRegion] = React.useState({
+		latitude: 49.842957, 
+		longitude: 24.031111,
+		latitudeDelta: 0.0922,
+		longitudeDelta: 0.0421
+	});
+	const [userLocation, setUserLocation] = React.useState(null);
+	const [polylineCoordinates, setPolylineCoordinates] = React.useState([]);
 
-  useEffect(() => {
-    // Check and request location permission for Android
-    const requestLocationPermission = async () => {
-      try {
-          getCurrentLocation();
-        }
-       catch (err) {
-        console.warn(err);
-      }
-    };
+	React.useEffect(() => {
+		(async () => {
+			let { status } = await Location.requestForegroundPermissionsAsync();
+			if (status !== 'granted') {
+				console.error('Permission to access location was denied');
+				return;
+			}
 
-    requestLocationPermission();
+			let location = await Location.getCurrentPositionAsync({});
+			setUserLocation({
+				latitude: location.coords.latitude,
+				longitude: location.coords.longitude
+			});
+		})();
+	}, []);
 
-    // Cleanup function
-    return () => {
-      Geolocation.clearWatch(watchId);
-    };
-  }, []);
+	const getDirections = async () => {
+		try {
+			const response = await fetch(
+				`https://maps.googleapis.com/maps/api/directions/json?origin=${userLocation.latitude},${userLocation.longitude}&destination=${pin.latitude},${pin.longitude}&key=YOUR_GOOGLE_MAPS_API_KEY`
+			);
 
-  const getCurrentLocation = () => {
-    Geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        setUserLocation({ latitude, longitude });
-      },
-      (error) => console.log(error),
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 1000 }
-    );
-  };
+			const data = await response.json();
 
-  const watchId = Geolocation.watchPosition(
-    (position) => {
-      const { latitude, longitude } = position.coords;
-      setUserLocation({ latitude, longitude });
-    },
-    (error) => console.log(error),
-    { enableHighAccuracy: true, timeout: 20000, maximumAge: 1000, distanceFilter: 10 }
-  );
+			if (data.routes.length) {
+				const points = data.routes[0].overview_polyline.points;
+				const decodedPoints = decodePolyline(points);
+				setPolylineCoordinates(decodedPoints);
+			} else {
+				// console.error('No route found');
+			}
+		} catch (error) {
+			console.error('Error getting directions:', error);
+		}
+	};
 
-  return (
-    <View style={{ flex: 1 }}>
-      <MapView
-        style={styles.map}
-        initialRegion={region}
-        provider="google"
-        showsUserLocation={true}
-        followsUserLocation={true}
-      >
-        {userLocation && (
-          <MapViewDirections
-            origin={userLocation}
-            destination={pin}
-            apikey="AIzaSyC7EdSBr2rAHxn1LtJJauW-Be4IRpliNH4"
-            strokeWidth={3}
-            strokeColor="hotpink"
-          />
-        )}
-        <Marker coordinate={{ latitude: region.latitude, longitude: region.longitude }} />
-        <Marker
-          coordinate={pin}
-          pinColor="black"
-          draggable={true}
-          onDragEnd={(e) => {
-            setPin({
-              latitude: e.nativeEvent.coordinate.latitude,
-              longitude: e.nativeEvent.coordinate.longitude,
-            });
-          }}
-        >
-          <Callout>
-            <Text>I'm here</Text>
-          </Callout>
-        </Marker>
-        <Circle center={pin} radius={1000} />
-      </MapView>
-    </View>
-  );
+	const decodePolyline = (polyline) => {
+		let points = [];
+		let index = 0;
+		const len = polyline.length;
+		let lat = 0;
+		let lng = 0;
+
+		while (index < len) {
+			let b;
+			let shift = 0;
+			let result = 0;
+			do {
+				b = polyline.charCodeAt(index++) - 63;
+				result |= (b & 0x1f) << shift;
+				shift += 5;
+			} while (b >= 0x20);
+
+			const dlat = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
+			lat += dlat;
+
+			shift = 0;
+			result = 0;
+			do {
+				b = polyline.charCodeAt(index++) - 63;
+				result |= (b & 0x1f) << shift;
+				shift += 5;
+			} while (b >= 0x20);
+
+			const dlng = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
+			lng += dlng;
+
+			points.push({
+				latitude: lat / 1e5,
+				longitude: lng / 1e5
+			});
+		}
+
+		return points;
+	};
+
+	React.useEffect(() => {
+		if (userLocation) {
+			getDirections();
+		}
+	}, [userLocation, pin]);
+
+	return (
+		<View style={{ flex: 1 }}>
+			<GooglePlacesAutocomplete
+				placeholder="Search"
+				fetchDetails={true}
+				GooglePlacesSearchQuery={{
+					rankby: "distance"
+				}}
+				onPress={(data, details = null) => {
+					console.log(data, details);
+					setRegion({
+						latitude: details.geometry.location.lat,
+						longitude: details.geometry.location.lng,
+						latitudeDelta: 0.0922,
+						longitudeDelta: 0.0421
+					});
+					setPin({
+						latitude: details.geometry.location.lat,
+						longitude: details.geometry.location.lng
+					});
+				}}
+				query={{
+					key: "AIzaSyC7EdSBr2rAHxn1LtJJauW-Be4IRpliNH4",
+					language: "en",
+					components: "country:ua",
+					types: "establishment",
+					radius: 30000,
+					location: `${region.latitude}, ${region.longitude}`
+				}}
+				styles={{
+					container: { flex: 0, position: "absolute", width: "100%", zIndex: 1 },
+					listView: { backgroundColor: "white" }
+				}}
+			/>
+			<MapView
+				style={styles.map}
+				region={userLocation ? {
+					latitude: userLocation.latitude,
+					longitude: userLocation.longitude,
+					latitudeDelta: 0.0922,
+					longitudeDelta: 0.0421
+				} : region}
+				provider="google"
+			>
+				{userLocation && (
+					<Marker coordinate={{ latitude: userLocation.latitude, longitude: userLocation.longitude }} />
+				)}
+				<Marker
+					coordinate={pin}
+					pinColor="black"
+					draggable={true}
+					onDragStart={(e) => {
+						console.log("Drag start", e.nativeEvent.coordinates);
+					}}
+					onDragEnd={(e) => {
+						setPin({
+							latitude: e.nativeEvent.coordinate.latitude,
+							longitude: e.nativeEvent.coordinate.longitude
+						});
+						setUserLocation({
+							latitude: e.nativeEvent.coordinate.latitude,
+							longitude: e.nativeEvent.coordinate.longitude
+						});
+						getDirections();
+					}}
+				>
+					<Callout>
+						<Text>I'm here</Text>
+					</Callout>
+				</Marker>
+				<Circle center={pin} radius={1000} />
+				<MapViewDirections
+					origin={userLocation}
+					destination={pin}
+					apikey="AIzaSyC7EdSBr2rAHxn1LtJJauW-Be4IRpliNH4"
+					strokeWidth={2}
+					strokeColor="blue"
+				/>
+			</MapView>
+		</View>
+	);
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  map: {
-    width: Dimensions.get("window").width,
-    height: Dimensions.get("window").height,
-  },
+	container: {
+		flex: 1,
+		backgroundColor: "#fff",
+		alignItems: "center",
+		justifyContent: "center"
+	},
+	map: {
+		width: Dimensions.get("window").width,
+		height: Dimensions.get("window").height
+	}
 });
