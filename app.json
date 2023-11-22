@@ -19,6 +19,8 @@
     },
     "android": {
       "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "READ_CONTACTS",
         "WRITE_EXTERNAL_STORAGE"
       ],
       "adaptiveIcon": {
